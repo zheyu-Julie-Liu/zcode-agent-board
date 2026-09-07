@@ -1,0 +1,23 @@
+{
+  "name": "agent-board",
+  "version": "0.2.3",
+  "description": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim/submit tasks with atomic locking, plus parallel-worker support inside a single conversation.",
+  "description_i18n": {
+    "en": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim/submit tasks with atomic locking, plus parallel-worker support inside a single conversation.",
+    "zh-CN": "ZCode 多 agent 任务看板：同一项目的多个对话通过原子锁接任务、提交任务、互相留言，并支持单对话内拆分并行 worker。"
+  },
+  "author": {
+    "name": "user",
+    "url": ""
+  },
+  "keywords": [
+    "kanban",
+    "task-board",
+    "multi-agent",
+    "coordination",
+    "agents",
+    "看板"
+  ],
+  "skills": "skills",
+  "commands": "commands"
+}

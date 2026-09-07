@@ -1,0 +1,34 @@
+{
+  "name": "agent-board-market",
+  "plugins": [
+    {
+      "name": "agent-board",
+      "displayName": "Agent Board",
+      "displayName_i18n": {
+        "en": "Agent Board",
+        "zh-CN": "Agent 跨对话任务看板"
+      },
+      "description": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim and submit tasks through atomic file locks, with a shared activity feed, a zero-dependency MCP server (12 tools), a /board command, and parallel-worker support inside a single conversation.",
+      "description_i18n": {
+        "en": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim and submit tasks through atomic file locks, with a shared activity feed, a zero-dependency MCP server (12 tools), a /board command, and parallel-worker support inside a single conversation.",
+        "zh-CN": "ZCode 多 agent 任务看板：同一项目的多个对话通过原子文件锁接任务、提交任务、留言交接；内置跨对话操作流水、零依赖 MCP server（12 个工具）、/board 命令，并支持单对话内拆分并行 worker。"
+      },
+      "version": "0.2.3",
+      "author": {
+        "name": "agent-board contributors"
+      },
+      "category": "developer-tools",
+      "keywords": [
+        "kanban",
+        "task-board",
+        "multi-agent",
+        "coordination",
+        "mcp",
+        "看板",
+        "多agent",
+        "协作"
+      ],
+      "source": "./agent-board"
+    }
+  ]
+}
