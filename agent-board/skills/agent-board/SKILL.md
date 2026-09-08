@@ -7,6 +7,8 @@ description: 跨对话/多 agent 任务看板（agent task board / kanban）。�
 
 看板数据在项目根的 `.agent-board/` 目录，同一项目的所有对话（以及对话内并行的 worker）共享它。
 
+> **多个项目共用一块板**：把看板固定指向同一目录——设环境变量 `AGENT_BOARD_ROOT=/path/to/project`（MCP 与 CLI 都认），或每条 CLI 命令加 `--root /path/to/project`、每个 MCP 工具传 `root` 参数。不同项目的任务用标题前缀分区（如 `[插件]`），任务号在同一块板内全局唯一。
+
 **两种访问方式（若本会话已连接 agent-board 的 MCP server，优先用 MCP）：**
 
 1. **MCP 工具**（推荐，结构化、免拼命令行）：工具名为 `board_list` / `board_add` / `board_claim` / `board_done` / `board_feed` 等（客户端里前缀通常是 `mcp__agent-board__`）。身份通过每个工具的 `agent` 参数传，同一对话内保持稳定。
@@ -46,7 +48,20 @@ python3 scripts/board.py release T-0003           # 放弃任务放回待办池
 python3 scripts/board.py touch T-0003             # 长任务续约锁（默认 30 分钟无活动可被接管）
 python3 scripts/board.py steal T-0003             # 接管已超时的认领
 python3 scripts/board.py cancel T-0003 --reason "重复"  # 取消任务
+python3 scripts/board.py inbox                    # 谁 @ 了我（默认只看未读；--ack 全部标为已读）
+python3 scripts/board.py deliver 晨报_2026-09-08.md --task T-0003 --note "夜班晨报"   # 把文件在 ZCode 里打开给 boss 看并记录送达
 ```
+
+## 送达人类：@提及收件箱、桌面通知、交付打开
+
+看板是文件，**人类不会主动刷**：留言里写 `@boss` 只是文本，本身不会通知到任何人。为此插件提供三层送达：
+
+1. **收件箱**：任务/留言/结果/原因里出现 `@名字`，会自动写进该名字的收件箱（`.agent-board/inbox/<名字>.jsonl`）。任何身份都能 `inbox` 查「谁 @ 了我」，看完 `inbox --ack` 清零；`board_overview.py` 顶部会置顶显示 boss 的未读提及。
+2. **桌面通知**：名字在通知名单里（`config.json` 的 `notify_mentions`，默认 `["boss"]`）的提及会弹 macOS 桌面通知（系统自带 osascript，非 macOS 静默跳过；`AGENT_BOARD_NOTIFY=0` 或 `config.json` `"notify": false` 可关）。作者 @ 自己不算。
+3. **交付打开**：写好的晨报/方案/报告等要给人看的文件，用 `deliver <文件> [--task T-xxxx] [--note …]`（MCP：`board_deliver`）——在桌面应用里打开（默认 ZCode，可用 `--app` / `AGENT_BOARD_OPEN_APP` / `config.json` `open_app` 改）、写对方收件箱、弹通知、并在关联任务下留言记录送达。**写完给人看的文件必须用它，不要只在留言里说「已写好」。**
+4. **文件可点击**：任务标题/说明/结果/留言里出现过的真实文件（绝对路径、`~/`、相对项目根的 `dir/file`、或项目根下的裸文件名如 `晨报_2026-09-08.md`），`show` 与 `board_overview.py` 会在末尾输出「📎 [文件名](绝对路径)」markdown 链接，在 ZCode 聊天里直接点开。所以**任务里把产物路径写清楚**，人就能从看板一键跳到文件。
+
+> 给 boss 看的东西记住两条：留言里 `@boss` 说事，文件用 `deliver` 送；路径写进任务，总览就能点。
 
 ## 工作流
 
@@ -74,7 +89,7 @@ python3 scripts/board.py cancel T-0003 --reason "重复"  # 取消任务
 
 ## 注意事项
 
-- **空闲必看板（协同铁律）**：等待用户、等待外部结果、或任务空档时，先 `feed`/`list` 检查其他 agent 的新请求并逐条回应——看板是跨对话唯一通道，已读不回会让对端阻塞
+- **空闲必看板（协同铁律）**：等待用户、等待外部结果、或任务空档时，先 `feed`/`list`/`inbox` 检查其他 agent 的新请求与 @我 的提及并逐条回应——看板是跨对话唯一通道，已读不回会让对端阻塞
 - 认领是原子的：两个 agent 同时 `claim` 同一单，只有一个成功，失败方会收到明确报错，换一单或稍后重试即可
 - 只有锁的持有者能 `done`/`release`；`review` 后任务进入待审核态，任何 agent 可 `done` 验收或 `claim` 返工
 - 不要直接编辑 `.agent-board/` 里的文件，一律走命令，保证锁与状态一致

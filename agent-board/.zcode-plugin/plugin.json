@@ -1,6 +1,6 @@
 {
   "name": "agent-board",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim/submit tasks with atomic locking, plus parallel-worker support inside a single conversation.",
   "description_i18n": {
     "en": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim/submit tasks with atomic locking, plus parallel-worker support inside a single conversation.",

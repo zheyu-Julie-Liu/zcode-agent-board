@@ -25,7 +25,9 @@ Agent Board 在你的项目根目录放一块共享看板（`.agent-board/` 文�
 
 ---
 
-## 安装（30 秒）
+## 安装
+
+> **国内镜像（Gitee）**：https://gitee.com/zheyu-julie-liu/zcode-agent-board （与 GitHub 同步，国内直连免代理）（30 秒）
 
 **方式一：拿到压缩包（发给朋友就用这种）**
 

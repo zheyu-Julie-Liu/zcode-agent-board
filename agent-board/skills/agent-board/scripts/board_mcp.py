@@ -9,8 +9,10 @@ board_mcp.py — agent-board 的 MCP server（stdio，零第三方依赖）
 协议：newline-delimited JSON-RPC 2.0（MCP stdio 传输）。
 身份：每个对话的 agent 在调用工具时传稳定的 agent 参数
      （如 main / worker-1），或配置里设环境变量 AGENT_BOARD_AGENT。
-看板定位：优先 AGENT_BOARD_ROOT 环境变量，其次从工作目录向上找
-        .agent-board / git 根；找不到时读操作会提示传 root 参数。
+看板定位：每次调用可传 root 参数；否则用启动时的 AGENT_BOARD_ROOT 环境变量，
+        再从工作目录向上找 .agent-board / git 根；找不到时读操作会提示传 root。
+送达人类：留言/任务里 @名字 会进对方收件箱（board_inbox 查看），@boss 还弹桌面通知；
+        board_deliver 把晨报/方案等文件直接在 ZCode 里打开给人看。
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ import sys
 from argparse import Namespace
 
 SERVER_NAME = "agent-board"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.4"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("agent_board_core", os.path.join(HERE, "board.py"))
@@ -113,6 +115,22 @@ TOOLS = [
           "root": {"type": "string", "description": ROOT_DESC},
           "agent": {"type": "string", "description": IDENTITY_DESC}},
          required=["task_id", "agent"], mutating=True),
+    tool("board_inbox", "查看某身份的 @提及收件箱（谁在哪个任务 @ 了我、说了什么）。默认只看未读；ack=true 把未读全部标记已读。boss 用 agent=boss 看漏掉的 @boss。",
+         {"agent": {"type": "string", "description": "要查看收件箱的身份名（如 boss / main）"},
+          "all": {"type": "boolean", "default": False, "description": "包含已读"},
+          "ack": {"type": "boolean", "default": False, "description": "把未读全部标记为已读"},
+          "root": {"type": "string", "description": ROOT_DESC}},
+         required=["agent"], mutating=True, defaults={"all": False, "ack": False}),
+    tool("board_deliver", "把交付物文件（晨报/方案/报告）在桌面应用（默认 ZCode）里打开给人看：写入对方收件箱、@boss 弹桌面通知；传 task_id 会在该任务下留言记录送达。写完给人看的文件必须用它。",
+         {"file": {"type": "string", "description": "文件绝对路径"},
+          "task_id": {"type": "string", "description": "关联任务 ID（可选）"},
+          "to": {"type": "string", "default": "boss", "description": "送达对象身份名（默认 boss）"},
+          "note": {"type": "string", "description": "附言（出现在留言与通知里）"},
+          "app": {"type": "string", "description": "打开用的应用名（默认 ZCode）"},
+          "root": {"type": "string", "description": ROOT_DESC},
+          "agent": {"type": "string", "description": IDENTITY_DESC}},
+         required=["file", "agent"], mutating=True,
+         defaults={"task_id": None, "to": "boss", "note": "", "app": None}),
 ]
 
 TOOL_MAP = {t["name"]: t for t in TOOLS}
@@ -160,7 +178,7 @@ def dispatch(name, args):
     out, err = io.StringIO(), io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            b = boardmod.Board()
+            b = boardmod.Board(root=root or None)
             getattr(b, t["name"].replace("board_", "cmd_"))(ns)
     except SystemExit:
         raise ToolError(err.getvalue().strip() or out.getvalue().strip() or "操作失败")

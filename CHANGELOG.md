@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 (2026-09-09)
+
+- **@boss 桌面通知**：看板 add/comment/done 检测 @boss 自动弹 macOS 通知（其他平台静默降级）
+- **boss 收件箱**：`.agent-board/inbox_boss.md` 追加式收件箱 + `board.py inbox [--unread|--ack]` 命令
+- **总览置顶**：board_overview 顶部显示 @boss 未读数与条目
+- **deliver 交付命令**：`board.py deliver <文件> [--task T-xxxx]` 一条命令打开交付物（晨报等）
+- **--root 参数**：跨仓操作看板显式传根，防默认根漂移
+- 文件链接可点击化等体验修正
+- 由 plugin-dev 开发、main 版本化发布
+
+## 0.2.3 (2026-09-07)
+
 ## 0.2.3 (2026-09-07)
 
 - 新增共享资源租约协议：独占资源（编辑器/游戏实例/设备）建常驻任务，claim=持有、release=归还，杜绝多方抢占

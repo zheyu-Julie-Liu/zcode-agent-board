@@ -13,7 +13,7 @@
         "en": "File-based multi-agent task board for ZCode: agents in different conversations of the same project claim and submit tasks through atomic file locks, with a shared activity feed, a zero-dependency MCP server (12 tools), a /board command, and parallel-worker support inside a single conversation.",
         "zh-CN": "ZCode 多 agent 任务看板：同一项目的多个对话通过原子文件锁接任务、提交任务、留言交接；内置跨对话操作流水、零依赖 MCP server（12 个工具）、/board 命令，并支持单对话内拆分并行 worker。"
       },
-      "version": "0.2.3",
+      "version": "0.2.4",
       "author": {
         "name": "agent-board contributors"
       },
