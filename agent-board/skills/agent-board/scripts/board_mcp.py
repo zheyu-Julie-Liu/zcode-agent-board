@@ -28,7 +28,7 @@ from argparse import Namespace
 from datetime import datetime, timezone
 
 SERVER_NAME = "agent-board"
-SERVER_VERSION = "0.2.9"
+SERVER_VERSION = "0.3.0"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("agent_board_core", os.path.join(HERE, "board.py"))

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 (2026-09-26)
+
+- **看板看门狗 board-watchdog**（boss 指示，规格 2026-09-25）：事件驱动替代定时巡逻——launchd `WatchPaths` 监视 `events.jsonl`，去抖 60 秒合并突发，偏移量记忆（重启/轮转不重响），急活（0 级任务 / @值守身份）弹 macOS 通知，普通事项零动作留给晨报
+  - `skills/agent-board/scripts/watchdog.py`：纯标准库，支持 `--once` 手动一轮、`--debounce` 覆盖、`wake_command` 预留钩子、镜像卡开关、日志自动轮转
+  - `install.sh --install-watchdog / --uninstall-watchdog`：一键装/卸 launchd 条目 + 配置（`~/.config/board-watchdog/`），卸载无残留
+  - 兼容单板分区制：插件仓/oversea 项目的 `.agent-board` 为同一事件流的符号链接，只监视真实根一处
+
 ## 0.2.9 (2026-09-22)
 
 - **MCP 循环调用护栏**（boss 指示：agent 误触 MCP 陷入死循环，同功能超 3 次自动禁用）：每次 MCP 调用记录到 `.agent-board/mcp_calls.jsonl`（身份/工具/参数指纹/时间）；同身份+同工具+同参数指纹在窗口内（默认 300 秒，可配 `loop_window_seconds`）达 **3 次**（`loop_threshold`）→ 自动临时禁用该工具（默认 600 秒，`loop_cooldown_seconds`，写 `tool_blocks.json`），后续调用直接拒绝并给出人话错误以打破 AI 重试循环

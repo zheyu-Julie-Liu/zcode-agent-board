@@ -40,7 +40,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "0.2.9"
+VERSION = "0.3.0"
 BOARD_DIR = ".agent-board"
 DEFAULT_STALE_SECONDS = 1800
 DEFAULT_NOTIFY_MENTIONS = ["boss"]

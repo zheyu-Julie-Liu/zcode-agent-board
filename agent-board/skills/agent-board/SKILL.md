@@ -58,6 +58,10 @@ python3 scripts/board.py check-files build/web    # 硬约束门禁：按 config
 
 红线类的规则（产物大小、数量上限等）**必须配置成门禁，不能只写在协作文字里**：在 `.agent-board/config.json` 配置 `"gates": [{"pattern": "*.pck", "max_mb": 25}, …]`（pattern 相对被检查目录，支持 `**` 递归），之后任何 agent 在导出/构建/备料/上传前跑 `check-files <目录>`（MCP：`board_check_files`）——有超限项立即失败并列出明细与红线值，把问题挡在推送之前，并回溯到产生它的任务。boss 原话（2026-09-12）：「规则写在纸上不如写在脚本里」。
 
+## 看门狗（可选 · 事件驱动急活提醒）
+
+安装：`bash install.sh --install-watchdog`（卸载 `--uninstall-watchdog`，无残留）。原理：launchd `WatchPaths` 监视 `events.jsonl`，去抖 60 秒后按偏移量处理新事件——**急活**（0 级任务 add、留言 @值守身份）弹 macOS 通知；普通事项零动作（看板即存储，晨报自然接走）。配置 `~/.config/board-watchdog/config.json`（监视哪些板/值守名单/关键词/wake_command 预留钩子）；手动跑一轮 `watchdog.py --once`；日志同目录 `watchdog.log`（自动轮转）。价值：用"脚本站岗、有事才叫人"替代高成本定时巡逻。
+
 ## 工作流不绑定个人
 
 流程性/流水线工作（导出、备料、打包、按既定 SOP 执行）**不专属某个 agent**：干活时把做法与关键参数留痕（任务留言/交接单），同模型的任何 agent 读过 SOP 就应能直接 `claim` 接手继续，而不是等原先的 agent 有空。唯一例外 = 各渠道唯一发布执行人（push 类操作仍按分工）。

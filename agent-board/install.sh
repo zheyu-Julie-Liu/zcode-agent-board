@@ -4,6 +4,8 @@
 # 用法：
 #   ./install.sh              # 装到用户级：所有项目、所有对话可用（skill + /board + MCP）
 #   ./install.sh --project    # 额外把协作规则注入当前项目的 AGENTS.md（幂等，可重复执行）
+#   ./install.sh --install-watchdog    # 额外安装看板看门狗（launchd 事件驱动急活提醒）
+#   ./install.sh --uninstall-watchdog  # 卸载看门狗（launchd 条目+配置目录，无残留）
 #
 # 卸载：见 README「卸载」一节。
 set -euo pipefail
@@ -41,6 +43,69 @@ with open(cfg_path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, ensure_ascii=False, indent=2)
 print("✔ MCP server 已注册到", cfg_path)
 PYEOF
+
+# 2.5) 可选：看门狗（--install-watchdog / --uninstall-watchdog）
+WATCHDOG_PY="$SKILLS_DIR/agent-board/scripts/watchdog.py"
+PLIST_SRC="$SRC_DIR/templates/com.boss.board-watchdog.plist"
+WATCHDOG_LABEL="com.boss.board-watchdog"
+PLIST_DST="$HOME/Library/LaunchAgents/$WATCHDOG_LABEL.plist"
+WATCHDOG_CFG_DIR="$HOME/.config/board-watchdog"
+
+if [ "${1:-}" = "--uninstall-watchdog" ] || [ "${2:-}" = "--uninstall-watchdog" ]; then
+  launchctl bootout "gui/$(id -u)/$WATCHDOG_LABEL" 2>/dev/null || launchctl remove "$WATCHDOG_LABEL" 2>/dev/null || true
+  rm -f "$PLIST_DST"
+  rm -rf "$WATCHDOG_CFG_DIR"
+  echo "✔ 看门狗已卸载（launchd 条目 + $WATCHDOG_CFG_DIR 均已删除，无残留）"
+  case "${1:-}${2:-}" in *"--project"*) ;; *) exit 0 ;; esac
+fi
+
+if [ "${1:-}" = "--install-watchdog" ] || [ "${2:-}" = "--install-watchdog" ]; then
+  python3 - "$WATCHDOG_PY" "$PLIST_SRC" "$PLIST_DST" "$WATCHDOG_CFG_DIR" <<'PYEOF'
+import json, os, subprocess, sys
+watchdog_py, plist_src, plist_dst, cfg_dir = sys.argv[1:5]
+cfg_path = os.path.join(cfg_dir, "config.json")
+os.makedirs(cfg_dir, exist_ok=True)
+if not os.path.exists(cfg_path):
+    default_events = ("/Users/user/Documents/trae_projects/Reed-birdwatching-simulater/"
+                      "Reed-Bird-watching-simulator-exhibit/.agent-board/events.jsonl")
+    cfg = {"boards": [default_events] if os.path.exists(default_events) else [],
+           "watch_identities": ["doc-audit", "plugin-dev"], "quiet_identities": ["doc-audit"],
+           "self_identity": "watchdog", "urgent_priority": 0, "urgent_keywords": [],
+           "wake_command": "", "mirror_urgent_card": False, "notify": True,
+           "debounce_seconds": 60,
+           "state_file": os.path.join(cfg_dir, "state.json"),
+           "log_file": os.path.join(cfg_dir, "watchdog.log")}
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    print("✔ 看门狗配置已生成", cfg_path, "boards =", cfg["boards"] or "（空，请编辑 config.json 加入 events.jsonl 路径）")
+else:
+    print("ℹ 看门狗配置已存在，跳过生成")
+cfg = json.load(open(cfg_path, encoding="utf-8"))
+tpl = open(plist_src, encoding="utf-8").read()
+plist = (tpl.replace("__PYTHON__", sys.executable)
+            .replace("__WATCHDOG_PY__", watchdog_py)
+            .replace("__STDOUT__", os.path.join(cfg_dir, "launchd.out.log"))
+            .replace("__STDERR__", os.path.join(cfg_dir, "launchd.err.log")))
+events = "</string>\n        <string>".join(cfg.get("boards", []))
+import re
+plist = re.sub(r'(<key>WatchPaths</key>\s*<array>\s*)<string>__EVENTS_PATH__</string>(\s*</array>)',
+               lambda m: m.group(1) + ("<string>" + events + "</string>" if events else "") + m.group(2)
+               if events else m.group(1) + m.group(2), plist)
+os.makedirs(os.path.dirname(plist_dst), exist_ok=True)
+with open(plist_dst, "w", encoding="utf-8") as f:
+    f.write(plist)
+print("✔ launchd plist 已写入", plist_dst, "WatchPaths =", cfg.get("boards", []))
+uid = os.getuid()
+r = subprocess.run(["launchctl", "bootstrap", "gui/%d" % uid, plist_dst], capture_output=True, text=True)
+if r.returncode != 0:
+    r = subprocess.run(["launchctl", "load", "-w", plist_dst], capture_output=True, text=True)
+print("✔ launchd 已加载" if r.returncode == 0 else "⚠ launchd 加载返回 %d：%s" % (r.returncode, r.stderr.strip()))
+r = subprocess.run([sys.executable, watchdog_py, "--once"], capture_output=True, text=True)
+print("✔ 自测一轮完成：" + (r.stdout.strip().splitlines() or ["（无新事件）"])[0])
+print("验证：launchctl list | grep board-watchdog；日志：", os.path.join(cfg_dir, "watchdog.log"))
+PYEOF
+  case "${1:-}${2:-}" in *"--project"*) ;; *) echo ""; echo "看门狗安装完成。调整监视范围：编辑 $WATCHDOG_CFG_DIR/config.json"; exit 0 ;; esac
+fi
 
 # 3) 可选：向当前项目注入协作规则（--project）
 if [ "${1:-}" = "--project" ] || [ "${2:-}" = "--project" ]; then
