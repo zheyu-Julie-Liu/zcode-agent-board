@@ -17,15 +17,18 @@ board_mcp.py — agent-board 的 MCP server（stdio，零第三方依赖）
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
 import os
 import sys
+import time
 from argparse import Namespace
+from datetime import datetime, timezone
 
 SERVER_NAME = "agent-board"
-SERVER_VERSION = "0.2.4"
+SERVER_VERSION = "0.2.9"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("agent_board_core", os.path.join(HERE, "board.py"))
@@ -131,6 +134,23 @@ TOOLS = [
           "agent": {"type": "string", "description": IDENTITY_DESC}},
          required=["file", "agent"], mutating=True,
          defaults={"task_id": None, "to": "boss", "note": "", "app": None}),
+    tool("board_check_files", "硬约束门禁：按看板 config.json 的 gates 规则（glob pattern + max_mb）检查目录下文件大小；有超限项返回 isError 且列出明细。导出/构建产物在备料、上传、推送前必须先跑——规则在脚本里，不靠记忆。",
+         {"dir": {"type": "string", "description": "要检查的目录（默认项目根；规则 pattern 相对该目录）"},
+          "root": {"type": "string", "description": ROOT_DESC}},
+         defaults={"dir": None}),
+    tool("board_block", "冻结违规 agent（系统级强制：其 claim 任何任务都会被拒绝）。仅 boss 身份可操作（force=true 需在板上留 boss 授权凭证）；boss 身份不可被冻结。",
+         {"target": {"type": "string", "description": "要冻结的身份名"},
+          "reason": {"type": "string", "description": "冻结原因（展示给被冻结者）"},
+          "force": {"type": "boolean", "default": False},
+          "root": {"type": "string", "description": ROOT_DESC},
+          "agent": {"type": "string", "description": IDENTITY_DESC}},
+         required=["target", "agent"], mutating=True, defaults={"reason": "", "force": False}),
+    tool("board_unblock", "解除冻结，恢复认领资格。仅 boss 身份可操作（force=true 需 boss 授权凭证）。",
+         {"target": {"type": "string", "description": "要解冻的身份名"},
+          "force": {"type": "boolean", "default": False},
+          "root": {"type": "string", "description": ROOT_DESC},
+          "agent": {"type": "string", "description": IDENTITY_DESC}},
+         required=["target", "agent"], mutating=True, defaults={"force": False}),
 ]
 
 TOOL_MAP = {t["name"]: t for t in TOOLS}
@@ -149,6 +169,75 @@ def board_root_available():
         if parent == d:
             return False
         d = parent
+
+
+# ---------- 循环调用护栏：调用流水 + 同工具同参数≥阈值 自动临时禁用（boss 指示 2026-09-15） ----------
+
+def _iso_ts(iso):
+    try:
+        return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (ValueError, TypeError):
+        return 0
+
+
+def mcp_loop_guard(b, agent, tool, params):
+    """记录每次 MCP 调用到 <板>/mcp_calls.jsonl；同身份+同工具+同参数指纹在窗口内达阈值 →
+    写 tool_blocks.json 临时禁用并拒绝执行。返回 (是否拦截, 说明)。任何 IO 异常都不影响主流程。"""
+    try:
+        agent_l = (agent or "unknown").lower()
+        sig = hashlib.md5(json.dumps(params, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:12]
+        now = time.time()
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        cfg = {}
+        cfg_path = os.path.join(b.dir, "config.json")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+        window = int(cfg.get("loop_window_seconds", 300))
+        threshold = int(cfg.get("loop_threshold", 3))
+        cooldown = int(cfg.get("loop_cooldown_seconds", 600))
+        calls_path = os.path.join(b.dir, "mcp_calls.jsonl")
+        blocks_path = os.path.join(b.dir, "tool_blocks.json")
+
+        blocks = []
+        if os.path.exists(blocks_path):
+            with open(blocks_path, encoding="utf-8") as f:
+                blocks = json.load(f).get("blocks", [])
+        active = [x for x in blocks
+                  if x.get("tool") == tool and str(x.get("agent", "")).lower() == agent_l
+                  and _iso_ts(x.get("until", "")) > now]
+        if active:
+            return True, "工具 %s 对身份「%s」临时禁用中（至 %s，原因：%s）。请停止重试，改用其他方式或向人类说明。" % (
+                tool, agent, active[0].get("until"), active[0].get("reason", ""))
+
+        with open(calls_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": now_iso, "agent": agent_l, "tool": tool, "sig": sig},
+                               ensure_ascii=False) + "\n")
+        recent = 0
+        with open(calls_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (str(r.get("agent", "")).lower() == agent_l and r.get("tool") == tool
+                        and r.get("sig") == sig and _iso_ts(r.get("ts", "")) > now - window):
+                    recent += 1
+        if recent >= threshold:
+            until_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + cooldown))
+            blocks = [x for x in blocks
+                      if not (x.get("tool") == tool and str(x.get("agent", "")).lower() == agent_l
+                              and _iso_ts(x.get("until", "")) > now)]
+            blocks.append({"agent": agent_l, "tool": tool, "until": until_iso,
+                           "reason": "疑似死循环：%d 秒内相同调用 %d 次" % (window, recent),
+                           "by": "mcp-loop-guard", "ts": now_iso})
+            with open(blocks_path, "w", encoding="utf-8") as f:
+                json.dump({"blocks": blocks}, f, ensure_ascii=False, indent=2)
+            return True, "检测到疑似死循环：工具 %s 相同参数在 %d 秒内已调用 %d 次，已临时禁用 %d 秒（至 %s）。请停止重试，改用其他方式或向人类说明。" % (
+                tool, window, recent, cooldown, until_iso)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False, ""
+    return False, ""
 
 
 def dispatch(name, args):
@@ -170,6 +259,16 @@ def dispatch(name, args):
     if not t["_mutating"] and not board_root_available():
         return "未找到看板：当前工作目录 %s 上方没有 .agent-board，也不在任何 git 仓库内。" \
                "请传 root 参数指定项目根，或先由任一 agent 创建任务。" % os.getcwd()
+    # 循环调用护栏（记录流水 + 死循环自动临时禁用）：放在执行前，任何异常不阻断主流程
+    try:
+        guard_b = boardmod.Board(root=root or None)
+        blocked, why = mcp_loop_guard(guard_b, agent or "unknown", t["name"], params)
+        if blocked:
+            raise ToolError("🧊 " + why)
+    except ToolError:
+        raise
+    except (SystemExit, OSError, ValueError, TypeError):
+        pass
     merged = dict(t["_defaults"])
     merged.update(params)
     merged["agent"] = agent or "unknown"

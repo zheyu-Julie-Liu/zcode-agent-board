@@ -10,7 +10,8 @@ board.py — 文件型多 agent 任务看板 CLI（零第三方依赖，Python 3
     inbox/<名字>.jsonl  @提及收件箱（谁 @ 了我、在哪个任务、说了什么）；<名字>.ack 记已读水位
     config.json         可选配置 {"stale_seconds": 1800, "notify_mentions": ["boss"],
                         "notify": true, "notify_sound": "default", "open_app": "ZCode",
-                        "project_name": "显示名"}
+                        "project_name": "显示名",
+                        "gates": [{"pattern": "build/web/*.pck", "max_mb": 25}]}
 
 看板定位：--root > 环境变量 AGENT_BOARD_ROOT > 向上找已有 .agent-board > git 根 > cwd。
 多个项目共用一块板时，用前两者把看板固定指向同一个目录。
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import glob
 import json
 import os
 import re
@@ -38,7 +40,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "0.2.4"
+VERSION = "0.2.9"
 BOARD_DIR = ".agent-board"
 DEFAULT_STALE_SECONDS = 1800
 DEFAULT_NOTIFY_MENTIONS = ["boss"]
@@ -160,6 +162,7 @@ class Board:
         self.notify_sound = "default"
         self.open_app = DEFAULT_OPEN_APP
         self.project_name = os.path.basename(self.root)
+        self.gates = []
         cfg = os.path.join(self.dir, "config.json")
         if os.path.exists(cfg):
             try:
@@ -173,6 +176,9 @@ class Board:
                 self.notify_sound = c.get("notify_sound", "default")
                 self.open_app = c.get("open_app") or DEFAULT_OPEN_APP
                 self.project_name = c.get("project_name") or self.project_name
+                if isinstance(c.get("gates"), list):
+                    self.gates = [g for g in c["gates"] if isinstance(g, dict)
+                                  and g.get("pattern") and float(g.get("max_mb", 0)) > 0]
             except (json.JSONDecodeError, ValueError, OSError, AttributeError, TypeError):
                 pass
 
@@ -317,6 +323,37 @@ class Board:
         except (json.JSONDecodeError, OSError):
             return {"agent": "?", "host": "?", "pid": -1, "ts": ""}
 
+    # ---------- 违规冻结（系统级强制：被冻结者无法认领任何任务） ----------
+    def blocked_path(self):
+        return os.path.join(self.dir, "blocked.json")
+
+    def load_blocked(self):
+        """返回冻结名单 [{"name", "reason", "by", "ts"}]；文件缺失/损坏视为空。"""
+        p = self.blocked_path()
+        if not os.path.exists(p):
+            return []
+        try:
+            with open(p, encoding="utf-8") as f:
+                return [r for r in json.load(f).get("agents", []) if r.get("name")]
+        except (json.JSONDecodeError, OSError, AttributeError):
+            return []
+
+    def save_blocked(self, records):
+        atomic_write_json(self.blocked_path(), {"agents": records})
+
+    def check_not_blocked(self, agent):
+        rec = next((r for r in self.load_blocked()
+                    if r["name"].lower() == (agent or "").lower()), None)
+        if rec:
+            die("🧊 错误：身份「%s」已被冻结，禁止认领任务。原因：%s（冻结人 %s，%s）。"
+                "只有 boss 可解冻：board unblock %s" % (agent, rec.get("reason", "未填写"),
+                                                     rec.get("by", "?"), rec.get("ts", ""), agent))
+
+    def _require_boss(self, agent, force, action):
+        """冻结/解冻是管理动作：仅 boss 身份可直接执行，其他人须 --force（并在留言留痕）。"""
+        if (agent or "").lower() != "boss" and not force:
+            die("错误：%s 仅限 boss 身份操作（或带 --force 并在板上留言说明 boss 授权）" % action)
+
     def lock_is_stale(self, tid):
         """锁 mtime 超过 stale_seconds → 原认领者视为已离开。"""
         p = self.lock_path(tid)
@@ -398,6 +435,7 @@ class Board:
 
     def cmd_claim(self, args):
         agent = args.agent
+        self.check_not_blocked(agent)
         if args.task_id:
             task = self.load_task(args.task_id)
             if task["status"] in ("done", "cancelled"):
@@ -623,7 +661,8 @@ class Board:
     def cmd_whoami(self, args):
         info = {"agent": args.agent, "root": self.root, "board_dir": self.dir, "project_name": self.project_name,
                 "stale_seconds": self.stale_seconds, "notify_mentions": self.notify_mentions,
-                "notify": self.notify_enabled, "open_app": self.open_app, "version": VERSION}
+                "notify": self.notify_enabled, "open_app": self.open_app, "gates": self.gates,
+                "version": VERSION}
         if args.json:
             print(json.dumps(info, ensure_ascii=False, indent=2))
             return
@@ -633,6 +672,15 @@ class Board:
         print("通知名单：%s（桌面通知%s）" % (" ".join("@" + n for n in self.notify_mentions),
                                           "开" if self.notify_enabled else "关"))
         print("交付打开应用：%s" % self.open_app)
+        blocked = self.check_blocked_status(args.agent)
+        if blocked:
+            print("🧊 当前身份已被冻结（by %s，%s）：%s" % (blocked.get("by"), blocked.get("ts"), blocked.get("reason")))
+        else:
+            print("冻结状态：正常（未在冻结名单）")
+
+    def check_blocked_status(self, agent):
+        return next((r for r in self.load_blocked()
+                     if r["name"].lower() == (agent or "").lower()), None)
 
     def cmd_inbox(self, args):
         name = (args.agent or "").lstrip("@").lower()
@@ -661,6 +709,119 @@ class Board:
         for r in entries:
             print("%s  %-12s %-7s %-8s %s" % (r.get("ts", ""), truncate(r.get("from", "?"), 12),
                                             r.get("task", "-"), r.get("event", ""), truncate(r.get("text", ""), 110)))
+
+    def cmd_block(self, args):
+        """冻结违规 agent：系统级强制，被冻结者 claim 任何任务都会被拒。仅 boss（或 --force）。"""
+        self._require_boss(args.agent, args.force, "冻结（block）")
+        name = args.target.lstrip("@").lower()
+        if not name:
+            die("错误：请给出要冻结的身份名")
+        if name == "boss":
+            die("错误：boss 身份不可被冻结")
+        records = [r for r in self.load_blocked() if r["name"].lower() != name]
+        records.append({"name": name, "reason": args.reason or "违反看板规则",
+                        "by": args.agent, "ts": now_iso()})
+        self.save_blocked(records)
+        self.log_event(args.agent, "block", "-", "%s：%s" % (name, args.reason))
+        print("🧊 已冻结「%s」——其 claim 任务将被系统拒绝。原因：%s" % (name, args.reason or "违反看板规则"))
+        print("解冻：board unblock %s（仅 boss）" % name)
+
+    def cmd_unblock(self, args):
+        self._require_boss(args.agent, args.force, "解冻（unblock）")
+        name = args.target.lstrip("@").lower()
+        records = self.load_blocked()
+        kept = [r for r in records if r["name"].lower() != name]
+        if len(kept) == len(records):
+            print("「%s」不在冻结名单中（无需解冻）。" % name)
+            return
+        self.save_blocked(kept)
+        self.log_event(args.agent, "unblock", "-", name)
+        print("🔓 已解冻「%s」，可正常认领任务。" % name)
+
+    def cmd_check_files(self, args):
+        """硬约束门禁：按 config.json 的 gates（pattern + max_mb）检查目录下文件大小。
+        有超限项时退出码 1——导出/备料/推送前必须先跑，规则在脚本里，不靠记忆。"""
+        scan = os.path.realpath(os.path.expanduser(args.dir)) if args.dir else self.root
+        if not os.path.isdir(scan):
+            die("错误：目录不存在：%s" % scan)
+        violations, checked = [], 0
+        for g in self.gates:
+            for p in glob.glob(os.path.join(scan, g["pattern"]), recursive=True):
+                if not os.path.isfile(p):
+                    continue
+                checked += 1
+                mb = os.path.getsize(p) / (1024 * 1024)
+                if mb > float(g["max_mb"]):
+                    violations.append({"file": p, "mb": round(mb, 1),
+                                       "max_mb": float(g["max_mb"]), "gate": g["pattern"]})
+        violations.sort(key=lambda v: -v["mb"])
+        if args.json:
+            print(json.dumps({"ok": not violations and bool(self.gates), "dir": scan, "checked": checked,
+                              "rules": len(self.gates), "violations": violations}, ensure_ascii=False, indent=2))
+        else:
+            if not self.gates:
+                print("（未配置门禁：在 .agent-board/config.json 加 \"gates\": "
+                      "[{\"pattern\": \"*.pck\", \"max_mb\": 25}, …]；pattern 相对被检查目录）")
+            print("门禁检查 %s：%d 个文件对照 %d 条规则。" % (scan, checked, len(self.gates)))
+            if violations:
+                print("❌ 超限 %d 个——禁止进入备料/推送，回溯对应任务：" % len(violations))
+                for v in violations:
+                    print("  %s = %.1fMB（红线 %.0fMB，规则 %s）" % (v["file"], v["mb"], v["max_mb"], v["gate"]))
+            elif self.gates:
+                print("✅ 全部达标。")
+        if violations:
+            sys.exit(1)
+
+    def cmd_toolstats(self, args):
+        """MCP 调用监控：最近 1 小时按 身份×工具 汇总 + 当前临时禁用清单 + 最近调用明细。"""
+        def _ts(iso):
+            try:
+                return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+            except (ValueError, TypeError):
+                return 0
+        calls_path = os.path.join(self.dir, "mcp_calls.jsonl")
+        blocks_path = os.path.join(self.dir, "tool_blocks.json")
+        rows = []
+        if os.path.exists(calls_path):
+            with open(calls_path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        now = time.time()
+        hour = [r for r in rows if _ts(r.get("ts", "")) > now - 3600]
+        agg = {}
+        for r in hour:
+            k = (str(r.get("agent", "?")), str(r.get("tool", "?")))
+            agg[k] = agg.get(k, 0) + 1
+        ranked = sorted(agg.items(), key=lambda kv: -kv[1])
+        blocks = []
+        if os.path.exists(blocks_path):
+            try:
+                with open(blocks_path, encoding="utf-8") as f:
+                    blocks = [x for x in json.load(f).get("blocks", []) if _ts(x.get("until", "")) > now]
+            except (json.JSONDecodeError, OSError, AttributeError):
+                blocks = []
+        if args.json:
+            print(json.dumps({"calls_last_hour": len(hour),
+                              "by_agent_tool": [{"agent": a, "tool": t, "count": c} for (a, t), c in ranked],
+                              "active_blocks": blocks,
+                              "recent": rows[-10:]}, ensure_ascii=False, indent=2))
+            return
+        print("MCP 调用监控（最近 1 小时，共 %d 次）：" % len(hour))
+        for (a, t), c in ranked:
+            flag = "  ← 高频，疑似循环" if c >= 15 else ""
+            print("  %-22s × %-24s %d%s" % (a, t, c, flag))
+        if not ranked:
+            print("  （最近 1 小时无调用记录）")
+        if blocks:
+            print("当前临时禁用：")
+            for x in blocks:
+                print("  🧊 [%s] %s × %s 至 %s（%s）" % (x.get("by", "?"), x.get("agent"), x.get("tool"),
+                                                      x.get("until"), x.get("reason", "")))
+        else:
+            print("当前无临时禁用。")
 
     def cmd_deliver(self, args):
         path = os.path.realpath(os.path.expanduser(args.file))
@@ -775,6 +936,20 @@ def build_parser():
     sp.add_argument("--note", help="附言（出现在留言与桌面通知里）")
     sp.add_argument("--app", help="打开用的应用名（默认 $AGENT_BOARD_OPEN_APP / config.json 的 open_app / ZCode）")
 
+    sp = attach("check-files", "硬约束门禁：按 config.json 的 gates 规则检查文件大小，超限退出码 1", Board.cmd_check_files)
+    sp.add_argument("dir", nargs="?", help="要检查的目录（默认项目根；pattern 相对该目录）")
+
+    sp = attach("block", "冻结违规 agent（系统级：其 claim 任何任务都被拒绝）。仅 boss 身份（或 --force 并留言说明 boss 授权）", Board.cmd_block)
+    sp.add_argument("target", help="要冻结的身份名")
+    sp.add_argument("--reason", help="冻结原因（会展示给被冻结者）")
+    sp.add_argument("--force", action="store_true", help="非 boss 身份代操作（需在板上留 boss 授权凭证）")
+
+    sp = attach("unblock", "解除冻结。仅 boss 身份（或 --force）", Board.cmd_unblock)
+    sp.add_argument("target", help="要解冻的身份名")
+    sp.add_argument("--force", action="store_true")
+
+    attach("toolstats", "MCP 调用监控：最近 1 小时按身份×工具汇总 + 当前临时禁用清单（循环护栏）", Board.cmd_toolstats)
+
     attach("whoami", "查看当前身份、看板位置与通知设置", Board.cmd_whoami)
     return p
 
@@ -785,7 +960,7 @@ def main():
     if not getattr(args, "cmd", None):
         parser.print_help()
         sys.exit(0)
-    Board(root=getattr(args, "root", None)).__getattribute__("cmd_%s" % args.cmd)(args)
+    Board(root=getattr(args, "root", None)).__getattribute__("cmd_%s" % args.cmd.replace("-", "_"))(args)
 
 
 if __name__ == "__main__":

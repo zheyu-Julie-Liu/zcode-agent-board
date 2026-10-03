@@ -35,6 +35,7 @@ python3 scripts/board.py <命令> …
 
 ```bash
 python3 scripts/board_overview.py --todo           # 人类全局视图（总进度/在飞/逐单留言）
+python3 scripts/board_overview.py --zone plugin    # 只看一个分区：plugin=按 [插件] 前缀，game=排除之
 python3 scripts/board.py list                     # 查看看板（默认隐藏已完成）
 python3 scripts/board.py list --all --json        # 全量 JSON（适合程序解析）
 python3 scripts/board.py add "任务标题" -d "详细说明" -p 1   # 创建任务（优先级 0 最高 / 2 默认）
@@ -50,7 +51,16 @@ python3 scripts/board.py steal T-0003             # 接管已超时的认领
 python3 scripts/board.py cancel T-0003 --reason "重复"  # 取消任务
 python3 scripts/board.py inbox                    # 谁 @ 了我（默认只看未读；--ack 全部标为已读）
 python3 scripts/board.py deliver 晨报_2026-09-08.md --task T-0003 --note "夜班晨报"   # 把文件在 ZCode 里打开给 boss 看并记录送达
+python3 scripts/board.py check-files build/web    # 硬约束门禁：按 config.json gates 查文件大小，超限 exit 1
 ```
+
+## 硬约束门禁（规则进脚本，不进记忆）
+
+红线类的规则（产物大小、数量上限等）**必须配置成门禁，不能只写在协作文字里**：在 `.agent-board/config.json` 配置 `"gates": [{"pattern": "*.pck", "max_mb": 25}, …]`（pattern 相对被检查目录，支持 `**` 递归），之后任何 agent 在导出/构建/备料/上传前跑 `check-files <目录>`（MCP：`board_check_files`）——有超限项立即失败并列出明细与红线值，把问题挡在推送之前，并回溯到产生它的任务。boss 原话（2026-09-12）：「规则写在纸上不如写在脚本里」。
+
+## 工作流不绑定个人
+
+流程性/流水线工作（导出、备料、打包、按既定 SOP 执行）**不专属某个 agent**：干活时把做法与关键参数留痕（任务留言/交接单），同模型的任何 agent 读过 SOP 就应能直接 `claim` 接手继续，而不是等原先的 agent 有空。唯一例外 = 各渠道唯一发布执行人（push 类操作仍按分工）。
 
 ## 送达人类：@提及收件箱、桌面通知、交付打开
 
@@ -93,4 +103,5 @@ python3 scripts/board.py deliver 晨报_2026-09-08.md --task T-0003 --note "夜�
 - 认领是原子的：两个 agent 同时 `claim` 同一单，只有一个成功，失败方会收到明确报错，换一单或稍后重试即可
 - 只有锁的持有者能 `done`/`release`；`review` 后任务进入待审核态，任何 agent 可 `done` 验收或 `claim` 返工
 - 不要直接编辑 `.agent-board/` 里的文件，一律走命令，保证锁与状态一致
+- **违规冻结**：boss 可 `block <身份> --reason` 冻结违反规则的 agent——被冻结者 `claim` 任何任务都会被系统拒绝（`whoami` 可查自身状态），解冻仅 boss `unblock`。这是系统级约束，配合 `check-files` 门禁把「靠自觉」变成「靠脚本」
 - 看板目录默认建议加入 `.gitignore`（同机协作不需要提交；若要多机同步再提交它，靠 git 合并解决冲突）

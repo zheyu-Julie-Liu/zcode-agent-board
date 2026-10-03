@@ -1,16 +1,43 @@
 # Changelog
 
+## 0.2.9 (2026-09-22)
+
+- **MCP 循环调用护栏**（boss 指示：agent 误触 MCP 陷入死循环，同功能超 3 次自动禁用）：每次 MCP 调用记录到 `.agent-board/mcp_calls.jsonl`（身份/工具/参数指纹/时间）；同身份+同工具+同参数指纹在窗口内（默认 300 秒，可配 `loop_window_seconds`）达 **3 次**（`loop_threshold`）→ 自动临时禁用该工具（默认 600 秒，`loop_cooldown_seconds`，写 `tool_blocks.json`），后续调用直接拒绝并给出人话错误以打破 AI 重试循环
+- 新增 `board.py toolstats` 监控命令：最近 1 小时按 身份×工具 汇总调用次数、当前临时禁用清单、最近调用明细（`--json` 供程序解析）
+- 仅约束本插件的 MCP 工具调用；阈值/窗口/冷却可在 config.json 调整
+
+## 0.2.8 (2026-09-15)
+
+- **总览按三分区呈现**（boss 反馈：人类视角看不到分区）：「分区概览」行（游戏区/插件区/运营区 各自未完结数）+ 未完结任务（进行中/待审核/待办）按区分节（`── 游戏区` 等）；分区判定 = 标题前缀（[插件]/[运营]/无前缀=游戏区）
+- `/board` 汇报规矩升级：必须三分区结构化汇报，不得只报本对话负责的分区
+
+## 0.2.7 (2026-09-14)
+
+- **board_overview.py 分区过滤 `--zone`**（单板分区制配套，T-0037）：`--zone plugin` 只看 `[插件]` 前缀任务、`--zone game` 排除之、默认全量；标题栏注明过滤状态；@提及收件箱保持跨区可见不受过滤影响
+
+## 0.2.6 (2026-09-12)
+
+- **违规冻结机制**（boss 指示：违反看板规则的 agent 直接冻结、无法认领任务，系统级强制不靠自觉）：`board block <身份> --reason` / `board unblock <身份>`（MCP：`board_block` / `board_unblock`；仅 boss 身份可操作，boss 不可被冻结）；被冻结者 `claim` 任何任务（含自动选单）都会被拒绝并看到原因；冻结名单存 `.agent-board/blocked.json`，`whoami` 显示自身冻结状态
+- 场景：推送/发布类违规（如未核产物红线就上传）由 boss 冻结当事人，锁死认领资格直到 boss 解冻
+- 修复 `check-files` 的门禁提示示例；SKILL 注意事项补充冻结说明
+
+## 0.2.5 (2026-09-12)
+
+- **硬约束门禁 `check-files`**（boss 指示：红线必须自动生效，不能依赖记忆遵守）：`config.json` 配置 `"gates": [{"pattern": "*.pck", "max_mb": 25}, …]`（pattern 相对被检查目录，支持 `**` 递归），`board.py check-files <目录>` / MCP `board_check_files` 逐文件对照大小，超限退出码 1 并列明细——导出/构建/备料/上传前必跑，把超限产物挡在推送之前
+- SKILL 新增「硬约束门禁」「工作流不绑定个人」两节：同模型 agent 可凭 SOP 留痕直接接手流水线工作（push 类唯一发布执行人制不变）
+- 修复子命令名带连字符时 `cmd_` 方法映射失败的问题
+
 ## 0.2.4 (2026-09-09)
 
-- **@boss 桌面通知**：看板 add/comment/done 检测 @boss 自动弹 macOS 通知（其他平台静默降级）
-- **boss 收件箱**：`.agent-board/inbox_boss.md` 追加式收件箱 + `board.py inbox [--unread|--ack]` 命令
-- **总览置顶**：board_overview 顶部显示 @boss 未读数与条目
-- **deliver 交付命令**：`board.py deliver <文件> [--task T-xxxx]` 一条命令打开交付物（晨报等）
-- **--root 参数**：跨仓操作看板显式传根，防默认根漂移
-- 文件链接可点击化等体验修正
-- 由 plugin-dev 开发、main 版本化发布
+送达人类（真实使用反馈：boss 收不到 @boss、看不到晨报、看板上找不到文件）：
 
-## 0.2.3 (2026-09-07)
+- **@提及收件箱**：任务/留言/结果/原因里 `@名字` 自动写入 `.agent-board/inbox/<名字>.jsonl`；新增 `inbox`（`--all` / `--ack`）命令与 `board_inbox` MCP 工具，任何身份可查「谁 @ 了我」
+- **桌面通知**：通知名单（`config.json` `notify_mentions`，默认 `["boss"]`）内的提及弹 macOS 桌面通知（系统自带 osascript，零依赖；非 macOS 静默跳过；`AGENT_BOARD_NOTIFY=0` / `"notify": false` 可关；作者 @ 自己不算）
+- **deliver 交付打开**：`deliver <文件> [--task] [--to] [--note] [--app]` / `board_deliver`——在桌面应用（默认 ZCode，可配 `AGENT_BOARD_OPEN_APP` / `open_app`）里打开文件给人看，写收件箱、弹通知、关联任务留言记录送达
+- **文件可点击**：`show` 与 `board_overview.py` 自动把文本里真实存在的文件（绝对/`~/`/相对项目根/项目根裸文件名）渲染为 `📎 [文件名](绝对路径)` markdown 链接
+- **board_overview.py**：顶部置顶「📬 @boss 未读提及」（`--me` 换人）；标题改用 `config.json` `project_name` 或看板目录名（去掉硬编码项目名）；时间差改为正确的 UTC 解析
+- **看板定位**：CLI 新增 `--root`（子命令前后皆可）与 `AGENT_BOARD_ROOT` 环境变量（与 MCP 一致），多项目共用一块板不再依赖工作目录；`whoami --json` 输出根目录/通知设置/版本
+- board.py / board_mcp.py 版本号对齐 0.2.4；SKILL / README / commands/board.md / templates/AGENTS-snippet.md 同步
 
 ## 0.2.3 (2026-09-07)
 

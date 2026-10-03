@@ -96,7 +96,32 @@ def file_line(t: dict, root: str) -> str:
     return "      📎 " + "  ".join(_core.file_link(p) for p in files)
 
 
-def render(tasks: list, info: dict, inbox: list, me: str, todo_only: bool) -> str:
+ZONE_PREFIX = "[插件]"  # 单板分区制（boss 澄清 2026-09-07）：插件任务标题前缀，其余默认游戏区
+ZONE_OP = "[运营]"
+ZONE_ORDER = ["游戏区", "插件区", "运营区"]
+
+
+def zone_of(t: dict) -> str:
+    title = t.get("title", "")
+    if title.startswith(ZONE_PREFIX):
+        return "插件区"
+    if title.startswith(ZONE_OP):
+        return "运营区"
+    return "游戏区"
+
+
+def filter_zone(tasks: list, zone: str) -> list:
+    if zone == "plugin":
+        return [t for t in tasks if t.get("title", "").startswith(ZONE_PREFIX)]
+    if zone == "game":
+        return [t for t in tasks if not t.get("title", "").startswith(ZONE_PREFIX)]
+    return tasks
+
+
+ZONE_LABEL = {"plugin": "插件区", "game": "游戏区"}
+
+
+def render(tasks: list, info: dict, inbox: list, me: str, todo_only: bool, zone: str = "all") -> str:
     total = len(tasks)
     by = {}
     for t in tasks:
@@ -104,13 +129,18 @@ def render(tasks: list, info: dict, inbox: list, me: str, todo_only: bool) -> st
     done = len(by.get("done", []))
     root = info.get("root", "") or CWD
     title = info.get("project_name") or os.path.basename(root) or "项目"
+    zone_note = f" · {ZONE_LABEL.get(zone, '')}（按 {ZONE_PREFIX} 前缀过滤）" if zone in ZONE_LABEL else ""
     lines = []
     lines.append("=" * 62)
-    lines.append(f" {title} · 看板全项目进度（生成于 {time.strftime('%m-%d %H:%M')}）")
+    lines.append(f" {title} · 看板全项目进度（生成于 {time.strftime('%m-%d %H:%M')}）{zone_note}")
     lines.append(f" 总进度：{done}/{total} 完成 | "
                  + " ".join(f"{STATUS_LABEL[s]}{len(by.get(s, []))}"
                             for s in ["in_progress", "review", "todo", "done", "cancelled"]
                             if by.get(s)))
+    overview = " | ".join(
+        f"{z} 未完结{sum(1 for t in tasks if zone_of(t) == z and t['status'] in ('in_progress', 'review', 'todo'))}"
+        for z in ZONE_ORDER)
+    lines.append(f" 分区概览：{overview}（游戏区=无前缀，插件区=[插件]，运营区=[运营]）")
     lines.append("=" * 62)
 
     # 给人看的第一件事：谁 @ 了我还没看
@@ -141,7 +171,8 @@ def render(tasks: list, info: dict, inbox: list, me: str, todo_only: bool) -> st
         lines.append("")
         lines.append(f"{STATUS_ICON[status]} {STATUS_LABEL[status]}（{len(group)}）"
                      + ("——只列标题" if status == "done" and not todo_only else ""))
-        for t in group:
+
+        def emit(t: dict):
             owner = f"👤{t['claimed_by']}" if t.get("claimed_by") else "🈚无人认领"
             lines.append(f"  {t['id']} [P{t['priority']}] {t['title']}  （{owner}）")
             if status != "done":
@@ -151,6 +182,19 @@ def render(tasks: list, info: dict, inbox: list, me: str, todo_only: bool) -> st
             fl = file_line(t, root)
             if fl:
                 lines.append(fl)
+
+        if status in ("in_progress", "review", "todo"):
+            # 未完结任务按分区呈现（boss 视角要能一眼看到三个分区）
+            for z in ZONE_ORDER:
+                zgroup = [t for t in group if zone_of(t) == z]
+                if not zgroup:
+                    continue
+                lines.append(f"  ── {z}（{len(zgroup)}）")
+                for t in zgroup:
+                    emit(t)
+        else:
+            for t in group:
+                emit(t)
     lines.append("")
     lines.append("（本视图为固定口径全量快照；操作看板请仍用 board.py / board_* 工具）")
     return "\n".join(lines)
@@ -162,12 +206,18 @@ def main(argv):
         i = argv.index("--me")
         if i + 1 < len(argv):
             me = argv[i + 1].lstrip("@")
+    zone = "all"
+    if "--zone" in argv:
+        i = argv.index("--zone")
+        if i + 1 < len(argv) and argv[i + 1] in ("plugin", "game", "all"):
+            zone = argv[i + 1]
     tasks, err = board_json("list", "--all")
     if tasks is None:
         sys.exit("看板读取失败：未找到 .agent-board（请在含看板的项目内运行，或设置 $AGENT_BOARD_ROOT）\n" + err)
+    tasks = filter_zone(tasks, zone)
     info, _ = board_json("whoami")
     inbox, _ = board_json("inbox", agent=me)
-    print(render(tasks, info or {}, inbox or [], me, todo_only="--todo" in argv))
+    print(render(tasks, info or {}, inbox or [], me, todo_only="--todo" in argv, zone=zone))
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ cd agent-board        # 本仓库内的插件目录
 
 ## 用法
 
-安装后**无需记忆命令**：skill 会在「多对话协作 / 接任务 / 派任务 / 看板」等场景自动触发，引导 agent 使用；MCP server 提供 12 个 `board_*` 工具；人类随时可用 `/board` 查板。
+安装后**无需记忆命令**：skill 会在「多对话协作 / 接任务 / 派任务 / 看板」等场景自动触发，引导 agent 使用；MCP server 提供 14 个 `board_*` 工具；人类随时可用 `/board` 查板（顶部先列「谁 @ 了我」）。
 
 ```bash
 # agent 视角（也可全部走 MCP 工具）
@@ -45,13 +45,22 @@ python3 …/board.py add "修复寻路抖动" -d "…" -p 1 --agent main       #
 python3 …/board.py claim --agent conv-b                             # 接任务（自动挑单）
 python3 …/board.py done T-0001 -r "改动+验证方式" --agent conv-b     # 提交
 python3 …/board.py feed                                             # 谁在做什么
+python3 …/board.py inbox --agent boss                               # 谁 @ 了我（--ack 清零）
+python3 …/board.py deliver 晨报.md --task T-0001 --agent conv-b     # 把文件在 ZCode 里打开给 boss 并记录送达
+python3 …/board.py check-files build/web --agent conv-b            # 硬约束门禁：超 config.json 上限即 exit 1
 ```
+
+> 多个项目共用一块板：设 `AGENT_BOARD_ROOT=/path/to/project`（或 CLI `--root` / MCP `root` 参数），任务用标题前缀分区。
+
+### 送达人类（0.2.4 起）
+
+看板是文件，人不会主动刷。留言里 `@名字` 会进对方收件箱（`inbox` 查看），`@boss` 还会弹 **macOS 桌面通知**（系统自带 osascript，零依赖，非 macOS 静默跳过）；`deliver` 把晨报/方案等文件直接在 ZCode 里打开给人看并记录送达。通知名单/开关/打开应用可在 `.agent-board/config.json` 配 `notify_mentions` / `notify` / `open_app`。
 
 > 详细工作流（跨对话 / 单对话并行 / 交接接管）见 [agent-board/README.md](agent-board/README.md) 与 `skills/agent-board/SKILL.md`。
 
 ## 工作原理
 
-- 看板数据在**项目根** `.agent-board/`：`tasks/*.json`（原子写入）、`locks/*.lock`（`O_CREAT|O_EXCL` 抢锁）、`events.jsonl`（流水）、`config.json`（可选，`stale_seconds`）
+- 看板数据在**项目根** `.agent-board/`：`tasks/*.json`（原子写入）、`locks/*.lock`（`O_CREAT|O_EXCL` 抢锁）、`events.jsonl`（流水）、`inbox/<名字>.jsonl`（@提及收件箱）、`config.json`（可选：`stale_seconds` / `notify_mentions` / `notify` / `open_app` / `project_name` / `gates` 硬约束门禁）
 - 认领 = 抢锁，POSIX 语义保证同瞬间只有一个进程成功；任务 ID 分配同样用 `O_EXCL`，并发 `add` 不撞号
 - 锁 mtime 超过 `stale_seconds`（默认 1800s）视为原认领者离开，可 `steal`
 - 同机协作无需提交 `.agent-board/`；若要多机同步，把它提交进 git 即可升级为 GNAP 式协作
