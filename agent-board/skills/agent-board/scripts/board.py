@@ -40,7 +40,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 BOARD_DIR = ".agent-board"
 DEFAULT_STALE_SECONDS = 1800
 DEFAULT_NOTIFY_MENTIONS = ["boss"]
@@ -159,7 +159,7 @@ class Board:
         self.stale_seconds = DEFAULT_STALE_SECONDS
         self.notify_mentions = list(DEFAULT_NOTIFY_MENTIONS)
         self.notify_enabled = os.environ.get("AGENT_BOARD_NOTIFY", "1").lower() not in ("0", "false", "no", "off")
-        self.notify_sound = "default"
+        self.notify_sound = ""  # 默认静音（boss 指示：夜间 agent 通知禁止带声音）；需要时配 config.json notify_sound
         self.open_app = DEFAULT_OPEN_APP
         self.project_name = os.path.basename(self.root)
         self.gates = []
@@ -173,7 +173,7 @@ class Board:
                                         for n in c.get("notify_mentions", DEFAULT_NOTIFY_MENTIONS)]
                 if c.get("notify") is False:
                     self.notify_enabled = False
-                self.notify_sound = c.get("notify_sound", "default")
+                self.notify_sound = c.get("notify_sound", "")
                 self.open_app = c.get("open_app") or DEFAULT_OPEN_APP
                 self.project_name = c.get("project_name") or self.project_name
                 if isinstance(c.get("gates"), list):

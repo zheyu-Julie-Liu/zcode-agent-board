@@ -106,7 +106,7 @@ def notify(title, body):
         return False
     def esc(s):
         return str(s or "").replace("\\", "\\\\").replace('"', '\\"')
-    script = 'display notification "%s" with title "%s" subtitle "%s" sound name "default"' % (
+    script = 'display notification "%s" with title "%s" subtitle "%s"' % (
         esc(body), esc(title), esc("watchdog"))
     try:
         subprocess.run(["osascript", "-e", script], capture_output=True, timeout=8)

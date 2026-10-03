@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-09-26)
+
+- **通知默认静音**（boss 反馈：授权通知后夜间 agent 的 deliver/@boss 通知滴滴滴响个不停）：`notify_desktop`/看门狗通知不再默认携带声音，仅视觉提醒；需要声音的场合在 `.agent-board/config.json` 显式配 `"notify_sound": "Glass"` 等
+- 游戏板 config 已显式置空 `notify_sound`；看门狗通知同步静音
+
 ## 0.3.0 (2026-09-26)
 
 - **看板看门狗 board-watchdog**（boss 指示，规格 2026-09-25）：事件驱动替代定时巡逻——launchd `WatchPaths` 监视 `events.jsonl`，去抖 60 秒合并突发，偏移量记忆（重启/轮转不重响），急活（0 级任务 / @值守身份）弹 macOS 通知，普通事项零动作留给晨报
