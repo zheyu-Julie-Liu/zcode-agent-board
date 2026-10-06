@@ -45,7 +45,7 @@ BOARD_DIR = ".agent-board"
 DEFAULT_STALE_SECONDS = 1800
 DEFAULT_NOTIFY_MENTIONS = ["boss"]
 DEFAULT_OPEN_APP = "ZCode"
-MENTION_RE = re.compile(r"@([A-Za-z0-9_][A-Za-z0-9_.\-]*)")
+MENTION_RE = re.compile(r"(?<![A-Za-z0-9_.@])@([A-Za-z0-9_][A-Za-z0-9_.\-]*)")  # @ 须在词首：邮箱 oscc@oschina.cn 不再误识别为 @oschina.cn（0.3.2）
 STATUS_ORDER = {"todo": 0, "in_progress": 1, "review": 2, "done": 3, "cancelled": 4}
 STATUS_ZH = {
     "todo": "待办",
@@ -262,6 +262,22 @@ class Board:
             if name in self.notify_mentions:
                 self.notify_desktop("agent-board · @%s" % name, "%s · %s · %s" % (agent, tid, event), text)
         return sorted(names)
+
+    def cmd_msg(self, args):
+        """打印 Git 图谱工作日志的标准 commit message（0.3.2，boss 2026-10-07：防写走样）。
+        用法：git -c user.name="<你的身份>" commit -m "$(board.py msg T-xxxx --event done)"
+        谁负责由作者列（-c user.name）承载，message 只含 任务号+进度符号+超短句（≤30字符防手机截断）。"""
+        task = self.load_task(args.task_id)
+        sym = {"start": "▶", "done": "✅", "handoff": "↻", "review": "🔎"}.get(args.event, "✅")
+        title = task.get("title", "")
+        for p in ("[插件]", "[运营]"):
+            if title.startswith(p):
+                title = title[len(p):].strip()
+        title = re.sub(r"^【[^】]*】\s*", "", title)  # 去【类型】内部前缀
+        body = " ".join(title.split())
+        if len(body) > 20:
+            body = body[:20] + "…"
+        print("%s %s %s" % (args.task_id, sym, body))
 
     def open_file(self, path, app=None):
         """用桌面应用打开文件（默认 ZCode），失败回退系统默认方式。返回 (是否成功, 用的方式)。"""
@@ -874,6 +890,11 @@ def build_parser():
         sp = sub.add_parser(name, help=help_, parents=[common])
         sp.set_defaults(fn=fn)
         return sp
+
+    sp = attach("msg", "打印标准化图谱 commit message（配合 git -c user.name=<身份> 使用，0.3.2）", Board.cmd_msg)
+    sp.add_argument("task_id", help="任务 ID")
+    sp.add_argument("--event", default="done", choices=["start", "done", "handoff", "review"],
+                    help="进度：start=▶ 开工 / done=✅ 收工 / handoff=↻ 移交 / review=🔎 待验收")
 
     sp = attach("add", "创建任务", Board.cmd_add)
     sp.add_argument("title", help="任务标题")
