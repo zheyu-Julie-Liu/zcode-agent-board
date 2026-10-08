@@ -74,11 +74,13 @@ python3 $B deliver 报告.md --task T-0001 --agent conv-b              # 文件�
 ## 第 4 步：更新到最新版（本技能的长期价值）
 
 ```bash
-# 看线上最新版本：
+# 看线上最新版本（两源任选，内容一致；GitHub 为发布源头更新最快，Gitee 自动跟随）：
+curl -fsSL https://raw.githubusercontent.com/zheyu-Julie-Liu/zcode-agent-board/main/marketplace.json | grep '"version"'
 curl -fsSL https://gitee.com/zheyu-julie-liu/zcode-agent-board/raw/main/marketplace.json | grep '"version"'
 # 看本地已装版本：
 python3 ~/.zcode/skills/agent-board/scripts/board.py --version
-# 不一致 → 重跑第 1 步路线 A（幂等覆盖，即升级）；数据在项目 .agent-board/ 里不受影响
+# 不一致 → 重跑第 1 步路线 A 或 B（幂等覆盖，即升级）；数据在项目 .agent-board/ 里不受影响
+# Gitee 明显滞后 GitHub 时：在 Gitee 仓库页面点一次「强制同步」即可追平
 ```
 
 只要本技能文件还在你的 skills 目录，就永远可以这样拉到仓库里的新版本；仓库每次发新版，用户无需重新下载本文件。
@@ -98,6 +100,6 @@ python3 ~/.zcode/skills/agent-board/scripts/board.py --version
 
 ## 仓库
 
-- Gitee（主，国内直连）：https://gitee.com/zheyu-julie-liu/zcode-agent-board
-- GitHub（镜像）：https://github.com/zheyu-Julie-Liu/zcode-agent-board
+- GitHub（发布源头，更新最快）：https://github.com/zheyu-Julie-Liu/zcode-agent-board
+- Gitee（国内直连镜像，自动跟随 GitHub；明显滞后时仓库页点「强制同步」）：https://gitee.com/zheyu-julie-liu/zcode-agent-board
 - 文档：仓库内 `README.md` / `CHANGELOG.md`；License：MIT
